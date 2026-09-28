@@ -23,26 +23,35 @@ function buildShell() {
   const header = document.getElementById('app-header');
 
   const routeObserver = () => {
-    const currentHash = window.location.hash || '#/dashboard';
-    if (sidebar) {
-      showSidebar(sidebar, { currentRoute: currentHash });
-      if (currentHash === '#/login') {
-        sidebar.style.display = 'none';
-      } else {
-        sidebar.style.display = '';
+  const currentHash = window.location.hash || '#/dashboard';
+
+  if (sidebar) {
+    if (currentHash === '#/login') {
+      sidebar.style.display = 'none';
+    } else {
+      sidebar.style.display = '';
+
+      // Só renderiza o menu quando as permissões já estiverem carregadas.
+      if (window.__permissionsLoaded) {
+        showSidebar(sidebar, {
+          currentRoute: currentHash
+        });
       }
     }
+  }
 
-    if (header) {
-      renderHeader(header, { user: getCurrentUser() });
-      if (currentHash === '#/login') {
-        header.style.display = 'none';
-      } else {
-        header.style.display = '';
-      }
+  if (header) {
+    renderHeader(header, {
+      user: getCurrentUser()
+    });
+
+    if (currentHash === '#/login') {
+      header.style.display = 'none';
+    } else {
+      header.style.display = '';
     }
-  };
-
+  }
+};
   window.addEventListener('hashchange', routeObserver);
   routeObserver();
 

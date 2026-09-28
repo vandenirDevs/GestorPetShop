@@ -8,17 +8,54 @@ export async function render(root) {
 
   try {
     const data = await api.get('/api/dashboard');
-    const resumo = data?.resumo || {};
+    const dashboard = data?.dashboard || {};
+    const cadastros = dashboard.cadastros || {};
+    const agenda = dashboard.agenda || {};
+    const estoque = dashboard.estoque || {};
+    const vendas = dashboard.vendas || {};
+
     const metrics = [
-      { label: 'Vendas', value: safeText(resumo.total_vendas ?? resumo.vendas ?? 0), trend: 'Hoje' },
-      { label: 'Clientes', value: safeText(resumo.total_clientes ?? 0), trend: 'Ativos' },
-      { label: 'Pets', value: safeText(resumo.total_pets ?? 0), trend: 'Cadastrados' },
-      { label: 'Produtos', value: safeText(resumo.total_produtos ?? 0), trend: 'Catalogo' },
-      { label: 'Estoque', value: safeText(resumo.estoque_alertas ?? 0), trend: 'Alertas' },
-      { label: 'Agendamentos', value: safeText(resumo.total_agendamentos ?? 0), trend: 'Próximos' }
+      { label: 'Vendas', value: safeText(vendas.vendas_hoje ?? 0), trend: 'Hoje' },
+      { label: 'Clientes', value: safeText(cadastros.clientes_ativos ?? 0), trend: 'Ativos' },
+      { label: 'Pets', value: safeText(cadastros.pets_ativos ?? 0), trend: 'Cadastrados' },
+      { label: 'Produtos', value: safeText(estoque.produtos_ativos ?? 0), trend: 'Catalogo' },
+      { label: 'Estoque', value: safeText((estoque.estoque_baixo ?? 0) + (estoque.estoque_zerado ?? 0)), trend: 'Alertas' },
+      { label: 'Agendamentos', value: safeText(agenda.agendamentos_hoje ?? 0), trend: 'Próximos' }
     ];
 
-    const alerts = data?.alertas || [];
+    const alerts = [];
+
+    if ((estoque.estoque_baixo ?? 0) > 0) {
+      alerts.push({
+        prioridade: 'MEDIA',
+        tipo: 'Estoque baixo',
+        mensagem: `${estoque.estoque_baixo} produto(s) com estoque baixo.`
+      });
+    }
+
+    if ((estoque.estoque_zerado ?? 0) > 0) {
+      alerts.push({
+        prioridade: 'ALTA',
+        tipo: 'Estoque zerado',
+        mensagem: `${estoque.estoque_zerado} produto(s) sem estoque.`
+      });
+    }
+
+    if ((agenda.agendamentos_pendentes ?? 0) > 0) {
+      alerts.push({
+        prioridade: 'MEDIA',
+        tipo: 'Agendamentos pendentes',
+        mensagem: `${agenda.agendamentos_pendentes} agendamento(s) pendente(s).`
+      });
+    }
+
+    if ((agenda.consultas_pendentes ?? 0) > 0) {
+      alerts.push({
+        prioridade: 'MEDIA',
+        tipo: 'Consultas pendentes',
+        mensagem: `${agenda.consultas_pendentes} consulta(s) pendente(s).`
+      });
+    }
 
     const html = `
       <div class="page">
@@ -63,15 +100,15 @@ export async function render(root) {
           <div class="report-grid">
             <div class="info-box">
               <strong>Receita total</strong>
-              <span>${formatCurrency(resumo.receita_total || 0)}</span>
+              <span>${formatCurrency(vendas.faturamento_hoje ?? 0)}</span>
             </div>
             <div class="info-box">
               <strong>Vendas finalizadas</strong>
-              <span>${safeText(resumo.vendas_finalizadas || 0)}</span>
+              <span>${safeText(vendas.vendas_hoje ?? 0)}</span>
             </div>
             <div class="info-box">
               <strong>Última atualização</strong>
-              <span>${formatDate(resumo.atualizado_em || new Date())}</span>
+              <span>${formatDate(new Date())}</span>
             </div>
           </div>
         </div>

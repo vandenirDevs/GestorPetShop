@@ -87,13 +87,18 @@ export async function renderHeader(root, { user } = {}) {
       <h2>${titleMap[currentRoute] || 'Painel'}</h2>
     </div>
     <div class="header-actions">
-      <div class="notification-pill" title="Notificações">
+      <button type="button" class="notification-pill" title="Notificações" aria-label="Abrir notificações">
         🔔
         ${notificationsCount > 0 ? `<span class="notification-badge">${notificationsCount}</span>` : ''}
-      </div>
+      </button>
       ${userMenuMarkup}
     </div>
   `;
+
+  const notificationButton = root.querySelector('.notification-pill');
+  notificationButton?.addEventListener('click', () => {
+    window.location.hash = '#/notificacoes';
+  });
 
   const userButton = root.querySelector('.user-menu-button');
   const userMenu = root.querySelector('.user-dropdown');

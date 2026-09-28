@@ -165,3 +165,24 @@
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1rem;
 }
+
+/* CORREÇÃO DEFINITIVA - CARRINHO DO PDV */
+.pdv-cart-table {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+}
+
+.pdv-cart-table .table-area {
+    display: table !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: none !important;
+    table-layout: fixed !important;
+}
+
+.pdv-cart-table th,
+.pdv-cart-table td {
+    box-sizing: border-box !important;
+}

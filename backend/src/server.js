@@ -110,6 +110,37 @@ const verificarPermissao = (modulo, acao) => {
     };
 };
 
+const normalizarPrecoServico = (valor, nomeCampo) => {
+    if (valor === undefined || valor === null || valor === '') {
+        return null;
+    }
+
+    const texto = String(valor).trim();
+
+    if (texto === '') {
+        return null;
+    }
+
+    const numero = Number(texto);
+
+    if (Number.isNaN(numero)) {
+        throw new Error(`Campo ${nomeCampo} deve ser numérico.`);
+    }
+
+    return numero;
+};
+
+const normalizarPrecosServico = (dados = {}) => {
+    const payload = { ...dados };
+    const campos = ['preco', 'preco_pequeno', 'preco_medio', 'preco_grande', 'duracao_minutos'];
+
+    campos.forEach((campo) => {
+        payload[campo] = normalizarPrecoServico(payload[campo], campo);
+    });
+
+    return payload;
+};
+
 
 app.get('/teste-db', async (req, res) => {
     try {
@@ -188,6 +219,12 @@ app.get(
 });
 app.listen(PORT, () => {
     console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+});
+app.get('/teste-prontuario', (req, res) => {
+    res.json({
+        sucesso: true,
+        mensagem: 'Rota de teste funcionando.'
+    });
 });
 
 
@@ -675,12 +712,16 @@ app.post(
     verificarPermissao('servicos', 'criar'),
     async (req, res) => {
     try {
+        const payload = normalizarPrecosServico(req.body || {});
         const {
             nome,
             descricao,
             preco,
+            preco_pequeno,
+            preco_medio,
+            preco_grande,
             duracao_minutos
-        } = req.body;
+        } = payload;
 
         if (!nome) {
             return res.status(400).json({
@@ -694,14 +735,20 @@ app.post(
                 nome,
                 descricao,
                 preco,
+                preco_pequeno,
+                preco_medio,
+                preco_grande,
                 duracao_minutos
             )
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
         `, [
             nome,
             descricao,
             preco,
+            preco_pequeno,
+            preco_medio,
+            preco_grande,
             duracao_minutos
         ]);
 
@@ -713,6 +760,13 @@ app.post(
 
     } catch (error) {
         console.error('Erro ao cadastrar serviço:', error);
+
+        if (error.message && error.message.startsWith('Campo ')) {
+            return res.status(400).json({
+                sucesso: false,
+                mensagem: error.message
+            });
+        }
 
         res.status(500).json({
             sucesso: false,
@@ -728,13 +782,17 @@ app.put(
     async (req, res) => {
     try {
         const { id } = req.params;
+        const payload = normalizarPrecosServico(req.body || {});
 
         const {
             nome,
             descricao,
             preco,
+            preco_pequeno,
+            preco_medio,
+            preco_grande,
             duracao_minutos
-        } = req.body;
+        } = payload;
 
         if (!nome) {
             return res.status(400).json({
@@ -749,14 +807,20 @@ app.put(
                 nome = $1,
                 descricao = $2,
                 preco = $3,
-                duracao_minutos = $4,
+                preco_pequeno = $4,
+                preco_medio = $5,
+                preco_grande = $6,
+                duracao_minutos = $7,
                 updated_at = NOW()
-            WHERE id = $5
+            WHERE id = $8
             RETURNING *
         `, [
             nome,
             descricao,
             preco,
+            preco_pequeno,
+            preco_medio,
+            preco_grande,
             duracao_minutos,
             id
         ]);
@@ -776,6 +840,13 @@ app.put(
 
     } catch (error) {
         console.error('Erro ao atualizar serviço:', error);
+
+        if (error.message && error.message.startsWith('Campo ')) {
+            return res.status(400).json({
+                sucesso: false,
+                mensagem: error.message
+            });
+        }
 
         res.status(500).json({
             sucesso: false,
@@ -960,6 +1031,79 @@ app.put(
 });
 
 app.patch(
+    '/api/agendamentos/:id/status',
+    autenticarToken,
+    verificarPermissao('agendamentos', 'editar'),
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { status } = req.body;
+
+            const statusPermitidos = [
+                'AGENDADO',
+                'CONFIRMADO',
+                'AGUARDANDO',
+                'EM_BUSCA',
+                'EM_ATENDIMENTO',
+                'PRONTO',
+                'CONCLUIDO',
+                'CANCELADO',
+                'NAO_COMPARECEU'
+            ];
+
+            if (!status || !statusPermitidos.includes(status)) {
+                return res.status(400).json({
+                    sucesso: false,
+                    mensagem: 'Status inválido.'
+                });
+            }
+
+           const result = await pool.query(`
+    UPDATE agendamentos
+    SET
+        status = $1::varchar,
+        inicio_atendimento = CASE
+            WHEN $1::varchar = 'EM_ATENDIMENTO'
+                 AND inicio_atendimento IS NULL
+            THEN NOW()
+            ELSE inicio_atendimento
+        END,
+        fim_atendimento = CASE
+            WHEN $1::varchar IN ('PRONTO', 'CONCLUIDO')
+                 AND fim_atendimento IS NULL
+            THEN NOW()
+            ELSE fim_atendimento
+        END,
+        updated_at = NOW()
+    WHERE id = $2
+    RETURNING *
+`, [status, id]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    sucesso: false,
+                    mensagem: 'Agendamento não encontrado.'
+                });
+            }
+
+            res.json({
+                sucesso: true,
+                mensagem: 'Status do agendamento atualizado com sucesso.',
+                agendamento: result.rows[0]
+            });
+
+        } catch (error) {
+            console.error('Erro ao atualizar status do agendamento:', error);
+
+            res.status(500).json({
+                sucesso: false,
+                mensagem: 'Erro ao atualizar status do agendamento.'
+            });
+        }
+    }
+);
+
+app.patch(
     '/api/agendamentos/:id/cancelar',
     autenticarToken,
     verificarPermissao('agendamentos', 'excluir'),
@@ -1011,6 +1155,9 @@ app.get(
                 nome,
                 descricao,
                 preco,
+                preco_pequeno,
+                preco_medio,
+                preco_grande,
                 duracao_minutos,
                 ativo
             FROM servicos
@@ -6608,14 +6755,14 @@ app.get(
     async (req, res) => {
         try {
             const [
-                clientes,
-                pets,
-                usuarios,
+                clientesAtivos,
+                petsAtivos,
+                usuariosAtivos,
                 agendamentosHoje,
                 consultasHoje,
                 agendamentosPendentes,
                 consultasPendentes,
-                produtos,
+                produtosAtivos,
                 estoqueBaixo,
                 estoqueZerado,
                 vendasHoje,
@@ -6624,82 +6771,57 @@ app.get(
                 vendasCanceladas
             ] = await Promise.all([
                 pool.query(`
-    SELECT
-        a.id,
-        a.pet_id,
-        pets.nome AS pet_nome,
-        clientes.nome AS cliente_nome,
-        a.servico_id,
-        servicos.nome AS servico_nome,
-        a.data,
-        a.horario,
-        a.status
-    FROM agendamentos a
-    INNER JOIN pets
-        ON pets.id = a.pet_id
-    INNER JOIN clientes
-        ON clientes.id = pets.cliente_id
-    INNER JOIN servicos
-        ON servicos.id = a.servico_id
-    WHERE a.status IN ('AGENDADO', 'CONFIRMADO')
-      AND a.data
-          BETWEEN CURRENT_DATE
-          AND CURRENT_DATE + INTERVAL '7 days'
-    ORDER BY a.data, a.horario
-`),
-
-                pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM clientes
                     WHERE ativo = TRUE
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM pets
                     WHERE ativo = TRUE
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM usuarios
                     WHERE ativo = TRUE
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM agendamentos
                     WHERE data = CURRENT_DATE
                       AND status NOT IN ('CANCELADO', 'NAO_COMPARECEU')
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM consultas
                     WHERE data_consulta = CURRENT_DATE
                       AND status NOT IN ('CANCELADA', 'CONCLUIDA')
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM agendamentos
                     WHERE status IN ('AGENDADO', 'CONFIRMADO')
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM consultas
                     WHERE status IN ('AGENDADA', 'CONFIRMADA')
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM produtos
                     WHERE ativo = TRUE
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM produtos
                     WHERE ativo = TRUE
                       AND estoque_atual > 0
@@ -6707,66 +6829,71 @@ app.get(
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM produtos
                     WHERE ativo = TRUE
                       AND estoque_atual <= 0
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM vendas
                     WHERE DATE(data_venda) = CURRENT_DATE
                       AND status = 'FINALIZADA'
                 `),
 
                 pool.query(`
-                    SELECT COALESCE(SUM(total), 0) AS total
+                    SELECT COALESCE(SUM(total), 0)::numeric AS total
                     FROM vendas
                     WHERE DATE(data_venda) = CURRENT_DATE
                       AND status = 'FINALIZADA'
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM vendas
                     WHERE status = 'ABERTA'
                 `),
 
                 pool.query(`
-                    SELECT COUNT(*) AS total
+                    SELECT COUNT(*)::int AS total
                     FROM vendas
                     WHERE status = 'CANCELADA'
                 `)
             ]);
 
+            const toNumber = (valor) => {
+                const numero = Number(valor ?? 0);
+                return Number.isFinite(numero) ? numero : 0;
+            };
+
             res.json({
                 sucesso: true,
                 dashboard: {
                     cadastros: {
-                        clientes_ativos: Number(clientes.rows[0].total),
-                        pets_ativos: Number(pets.rows[0].total),
-                        usuarios_ativos: Number(usuarios.rows[0].total)
+                        clientes_ativos: toNumber(clientesAtivos.rows[0]?.total),
+                        pets_ativos: toNumber(petsAtivos.rows[0]?.total),
+                        usuarios_ativos: toNumber(usuariosAtivos.rows[0]?.total)
                     },
 
                     agenda: {
-                        agendamentos_hoje: Number(agendamentosHoje.rows[0].total),
-                        consultas_hoje: Number(consultasHoje.rows[0].total),
-                        agendamentos_pendentes: Number(agendamentosPendentes.rows[0].total),
-                        consultas_pendentes: Number(consultasPendentes.rows[0].total)
+                        agendamentos_hoje: toNumber(agendamentosHoje.rows[0]?.total),
+                        consultas_hoje: toNumber(consultasHoje.rows[0]?.total),
+                        agendamentos_pendentes: toNumber(agendamentosPendentes.rows[0]?.total),
+                        consultas_pendentes: toNumber(consultasPendentes.rows[0]?.total)
                     },
 
                     estoque: {
-                        produtos_ativos: Number(produtos.rows[0].total),
-                        estoque_baixo: Number(estoqueBaixo.rows[0].total),
-                        estoque_zerado: Number(estoqueZerado.rows[0].total)
+                        produtos_ativos: toNumber(produtosAtivos.rows[0]?.total),
+                        estoque_baixo: toNumber(estoqueBaixo.rows[0]?.total),
+                        estoque_zerado: toNumber(estoqueZerado.rows[0]?.total)
                     },
 
                     vendas: {
-                        vendas_hoje: Number(vendasHoje.rows[0].total),
-                        faturamento_hoje: Number(faturamentoHoje.rows[0].total),
-                        vendas_abertas: Number(vendasAbertas.rows[0].total),
-                        vendas_canceladas: Number(vendasCanceladas.rows[0].total)
+                        vendas_hoje: toNumber(vendasHoje.rows[0]?.total),
+                        faturamento_hoje: toNumber(faturamentoHoje.rows[0]?.total),
+                        vendas_abertas: toNumber(vendasAbertas.rows[0]?.total),
+                        vendas_canceladas: toNumber(vendasCanceladas.rows[0]?.total)
                     }
                 }
             });
@@ -6837,7 +6964,11 @@ app.get(
                 data_fim
             ]);
 
-            const dados = result.rows[0];
+            const dados = result.rows[0] || {};
+            const toNumber = (valor) => {
+                const numero = Number(valor ?? 0);
+                return Number.isFinite(numero) ? numero : 0;
+            };
 
             res.json({
                 sucesso: true,
@@ -6846,11 +6977,11 @@ app.get(
                     data_fim
                 },
                 relatorio: {
-                    vendas_finalizadas: Number(dados.vendas_finalizadas),
-                    vendas_canceladas: Number(dados.vendas_canceladas),
-                    vendas_abertas: Number(dados.vendas_abertas),
-                    total_vendido: Number(dados.total_vendido),
-                    total_descontos: Number(dados.total_descontos)
+                    vendas_finalizadas: toNumber(dados.vendas_finalizadas),
+                    vendas_canceladas: toNumber(dados.vendas_canceladas),
+                    vendas_abertas: toNumber(dados.vendas_abertas),
+                    total_vendido: toNumber(dados.total_vendido),
+                    total_descontos: toNumber(dados.total_descontos)
                 }
             });
 
@@ -6906,10 +7037,16 @@ app.get(
                     nome
             `);
 
-            const produtos = result.rows;
+            const produtos = (result.rows || []).map((produto) => ({
+                ...produto,
+                estoque_atual: Number(produto.estoque_atual ?? 0),
+                estoque_minimo: Number(produto.estoque_minimo ?? 0),
+                preco_custo: Number(produto.preco_custo ?? 0),
+                preco_venda: Number(produto.preco_venda ?? 0)
+            }));
 
             const resumo = {
-                total_produtos: produtos.length,
+                total_produtos: Number(produtos.length || 0),
 
                 estoque_zerado: produtos.filter(
                     produto => produto.situacao_estoque === 'ZERADO'
@@ -6985,23 +7122,26 @@ app.get(
                 ORDER BY c.nome
             `);
 
-            const clientes = result.rows;
+            const clientes = (result.rows || []).map((cliente) => ({
+                ...cliente,
+                total_pets: Number(cliente.total_pets ?? 0)
+            }));
 
             const resumo = {
-                total_clientes: clientes.length,
+                total_clientes: Number(clientes.length || 0),
 
                 total_pets: clientes.reduce(
                     (total, cliente) =>
-                        total + Number(cliente.total_pets),
+                        total + Number(cliente.total_pets ?? 0),
                     0
                 ),
 
                 clientes_com_pets: clientes.filter(
-                    cliente => Number(cliente.total_pets) > 0
+                    cliente => Number(cliente.total_pets ?? 0) > 0
                 ).length,
 
                 clientes_sem_pets: clientes.filter(
-                    cliente => Number(cliente.total_pets) === 0
+                    cliente => Number(cliente.total_pets ?? 0) === 0
                 ).length
             };
 
@@ -7953,6 +8093,277 @@ app.delete(
         }
     }
 );
+
+// =====================================================
+// PRONTUÁRIO
+// =====================================================
+
+app.get(
+    '/api/prontuarios',
+    autenticarToken,
+    verificarPermissao('prontuario', 'visualizar'),
+    async (req, res) => {
+        try {
+            const result = await pool.query(`
+                SELECT
+                    p.id,
+                    p.pet_id,
+                    pets.nome AS pet,
+                    p.usuario_id,
+                    p.data_registro,
+                    p.tipo_registro,
+                    p.titulo,
+                    p.diagnostico,
+                    p.sintomas,
+                    p.tratamento,
+                    p.observacoes,
+                    p.ativo,
+                    p.created_at,
+                    p.updated_at
+                FROM prontuario p
+                INNER JOIN pets
+                    ON pets.id = p.pet_id
+                WHERE p.ativo = TRUE
+                ORDER BY p.data_registro DESC, p.id DESC
+            `);
+
+            res.json({
+                sucesso: true,
+                prontuarios: result.rows
+            });
+
+        } catch (error) {
+            console.error('Erro ao buscar prontuários:', error);
+
+            res.status(500).json({
+                sucesso: false,
+                mensagem: 'Erro ao buscar prontuários.'
+            });
+        }
+    }
+);
+
+app.post(
+    '/api/prontuarios',
+    autenticarToken,
+    verificarPermissao('prontuario', 'criar'),
+    async (req, res) => {
+        try {
+            const {
+                pet_id,
+                data_registro,
+                tipo_registro,
+                titulo,
+                diagnostico,
+                sintomas,
+                tratamento,
+                observacoes
+            } = req.body;
+
+            if (!pet_id || !tipo_registro) {
+                return res.status(400).json({
+                    sucesso: false,
+                    mensagem: 'Pet e tipo de registro são obrigatórios.'
+                });
+            }
+
+            const result = await pool.query(`
+                INSERT INTO prontuario (
+                    pet_id,
+                    usuario_id,
+                    data_registro,
+                    tipo_registro,
+                    titulo,
+                    diagnostico,
+                    sintomas,
+                    tratamento,
+                    observacoes
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    COALESCE($3, CURRENT_DATE),
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9
+                )
+                RETURNING
+                    id,
+                    pet_id,
+                    usuario_id,
+                    data_registro,
+                    tipo_registro,
+                    titulo,
+                    diagnostico,
+                    sintomas,
+                    tratamento,
+                    observacoes,
+                    ativo,
+                    created_at,
+                    updated_at
+            `, [
+                pet_id,
+                req.usuario.id,
+                data_registro || null,
+                tipo_registro,
+                titulo || null,
+                diagnostico || null,
+                sintomas || null,
+                tratamento || null,
+                observacoes || null
+            ]);
+
+            res.status(201).json({
+                sucesso: true,
+                mensagem: 'Prontuário cadastrado com sucesso.',
+                prontuario: result.rows[0]
+            });
+
+        } catch (error) {
+            console.error('Erro ao cadastrar prontuário:', error);
+
+            res.status(500).json({
+                sucesso: false,
+                mensagem: 'Erro ao cadastrar prontuário.'
+            });
+        }
+    }
+);
+
+app.put(
+    '/api/prontuarios/:id',
+    autenticarToken,
+    verificarPermissao('prontuario', 'editar'),
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const {
+                pet_id,
+                data_registro,
+                tipo_registro,
+                titulo,
+                diagnostico,
+                sintomas,
+                tratamento,
+                observacoes
+            } = req.body;
+
+            if (!pet_id || !tipo_registro) {
+                return res.status(400).json({
+                    sucesso: false,
+                    mensagem: 'Pet e tipo de registro são obrigatórios.'
+                });
+            }
+
+            const result = await pool.query(`
+                UPDATE prontuario
+                SET
+                    pet_id = $1,
+                    data_registro = COALESCE($2, data_registro),
+                    tipo_registro = $3,
+                    titulo = $4,
+                    diagnostico = $5,
+                    sintomas = $6,
+                    tratamento = $7,
+                    observacoes = $8,
+                    updated_at = NOW()
+                WHERE id = $9
+                  AND ativo = TRUE
+                RETURNING
+                    id,
+                    pet_id,
+                    usuario_id,
+                    data_registro,
+                    tipo_registro,
+                    titulo,
+                    diagnostico,
+                    sintomas,
+                    tratamento,
+                    observacoes,
+                    ativo,
+                    created_at,
+                    updated_at
+            `, [
+                pet_id,
+                data_registro || null,
+                tipo_registro,
+                titulo || null,
+                diagnostico || null,
+                sintomas || null,
+                tratamento || null,
+                observacoes || null,
+                id
+            ]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    sucesso: false,
+                    mensagem: 'Prontuário não encontrado.'
+                });
+            }
+
+            res.json({
+                sucesso: true,
+                mensagem: 'Prontuário atualizado com sucesso.',
+                prontuario: result.rows[0]
+            });
+
+        } catch (error) {
+            console.error('Erro ao atualizar prontuário:', error);
+
+            res.status(500).json({
+                sucesso: false,
+                mensagem: 'Erro ao atualizar prontuário.'
+            });
+        }
+    }
+);
+
+app.delete(
+    '/api/prontuarios/:id',
+    autenticarToken,
+    verificarPermissao('prontuario', 'excluir'),
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const result = await pool.query(`
+                UPDATE prontuario
+                SET
+                    ativo = FALSE,
+                    updated_at = NOW()
+                WHERE id = $1
+                  AND ativo = TRUE
+                RETURNING id
+            `, [id]);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({
+                    sucesso: false,
+                    mensagem: 'Prontuário não encontrado.'
+                });
+            }
+
+            res.json({
+                sucesso: true,
+                mensagem: 'Prontuário excluído com sucesso.'
+            });
+
+        } catch (error) {
+            console.error('Erro ao excluir prontuário:', error);
+
+            res.status(500).json({
+                sucesso: false,
+                mensagem: 'Erro ao excluir prontuário.'
+            });
+        }
+    }
+);
+
 
 app.get(
     '/api/permissoes/teste-usuarios',

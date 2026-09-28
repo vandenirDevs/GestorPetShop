@@ -4,6 +4,67 @@ import { openModal, closeModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { hasPermission } from '../permissions.js';
 
+function formatarMoeda(valor) {
+  const numero = Number(valor);
+
+  if (valor === null || valor === undefined || valor === '' || Number.isNaN(numero)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(numero);
+}
+
+function formatarPrecos(servico) {
+  const precos = [
+    ['P', servico?.preco_pequeno],
+    ['M', servico?.preco_medio],
+    ['G', servico?.preco_grande]
+  ];
+
+  const precosConfigurados = precos
+    .filter(([, valor]) => valor !== null && valor !== undefined && valor !== '')
+    .map(([label, valor]) => `${label}: ${formatarMoeda(valor)}`);
+
+  if (precosConfigurados.length > 0) {
+    const linhas = precos.map(([label, valor]) => {
+      if (valor === null || valor === undefined || valor === '') {
+        return `${label}: não configurado`;
+      }
+
+      return `${label}: ${formatarMoeda(valor)}`;
+    });
+
+    return linhas.join('<br>');
+  }
+
+  const precoLegacy = servico?.preco;
+
+  if (precoLegacy !== null && precoLegacy !== undefined && precoLegacy !== '') {
+    return `Preço: ${formatarMoeda(precoLegacy)}<br>P: não configurado<br>M: não configurado<br>G: não configurado`;
+  }
+
+  return 'P: não configurado<br>M: não configurado<br>G: não configurado';
+}
+
+function normalizarNumeroFormulario(valor) {
+  if (valor === undefined || valor === null || valor === '') {
+    return null;
+  }
+
+  const texto = String(valor).trim();
+
+  if (texto === '') {
+    return null;
+  }
+
+  const numero = Number(texto);
+
+  return Number.isNaN(numero) ? null : numero;
+}
+
 export async function render(root) {
   if (!hasPermission('servicos', 'visualizar')) {
     root.innerHTML = '<div class="alert error">Você não tem permissão para visualizar serviços.</div>';
@@ -37,7 +98,7 @@ export async function render(root) {
                 <tr>
                   <th>Nome</th>
                   <th>Descrição</th>
-                  <th>Preço</th>
+                  <th>Preços</th>
                   <th>Duração</th>
                   <th>Status</th>
                   <th>Ações</th>
@@ -48,7 +109,7 @@ export async function render(root) {
                   <tr>
                     <td data-label="Nome">${servico.nome}</td>
                     <td data-label="Descrição">${servico.descricao || '—'}</td>
-                    <td data-label="Preço">R$ ${Number(servico.preco || 0).toFixed(2).replace('.', ',')}</td>
+                    <td data-label="Preços">${formatarPrecos(servico)}</td>
                     <td data-label="Duração">${servico.duracao_minutos || '—'} min</td>
                     <td data-label="Status"><span class="status-badge ${servico.ativo ? 'success' : 'neutral'}">${servico.ativo ? 'Ativo' : 'Inativo'}</span></td>
                     <td data-label="Ações">
@@ -98,12 +159,20 @@ function openServicoModal(servico = null) {
         <input name="nome" value="${servico?.nome || ''}" required />
       </div>
       <div class="field-group">
-        <label>Preço</label>
-        <input name="preco" type="number" step="0.01" value="${servico?.preco || ''}" />
+        <label>Preço porte pequeno (P)</label>
+        <input name="preco_pequeno" type="number" step="0.01" min="0" value="${servico?.preco_pequeno ?? ''}" />
+      </div>
+      <div class="field-group">
+        <label>Preço porte médio (M)</label>
+        <input name="preco_medio" type="number" step="0.01" min="0" value="${servico?.preco_medio ?? ''}" />
+      </div>
+      <div class="field-group">
+        <label>Preço porte grande (G)</label>
+        <input name="preco_grande" type="number" step="0.01" min="0" value="${servico?.preco_grande ?? ''}" />
       </div>
       <div class="field-group">
         <label>Duração (minutos)</label>
-        <input name="duracao_minutos" type="number" value="${servico?.duracao_minutos || ''}" />
+        <input name="duracao_minutos" type="number" value="${servico?.duracao_minutos ?? ''}" />
       </div>
       <div class="field-group" style="grid-column: 1 / -1;">
         <label>Descrição</label>
@@ -122,7 +191,19 @@ function openServicoModal(servico = null) {
   const form = document.getElementById('servico-form');
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const payload = Object.fromEntries(new FormData(form).entries());
+    const raw = Object.fromEntries(new FormData(form).entries());
+    const payload = {
+      nome: raw.nome?.trim(),
+      descricao: raw.descricao?.trim() || null,
+      preco_pequeno: normalizarNumeroFormulario(raw.preco_pequeno),
+      preco_medio: normalizarNumeroFormulario(raw.preco_medio),
+      preco_grande: normalizarNumeroFormulario(raw.preco_grande),
+      duracao_minutos: normalizarNumeroFormulario(raw.duracao_minutos)
+    };
+
+    if (servico && servico.preco !== null && servico.preco !== undefined && servico.preco !== '') {
+      payload.preco = Number(servico.preco);
+    }
 
     try {
       if (servico) {

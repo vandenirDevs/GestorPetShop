@@ -34,9 +34,13 @@ export function hasPermission(modulo, acao) {
 }
 
 export function canAccessMenu(moduleName) {
-  return hasPermission(moduleName, 'visualizar') || moduleName === 'dashboard';
-}
 
+    if (moduleName === 'pdv') {
+        return hasPermission('vendas', 'visualizar');
+    }
+
+    return hasPermission(moduleName, 'visualizar') || moduleName === 'dashboard';
+}
 export function clearPermissions() {
   permissionsCache = null;
 }

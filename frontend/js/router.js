@@ -2,6 +2,7 @@ import { isAuthenticated, getCurrentUser } from './auth.js';
 import { loadPermissions, clearPermissions, canAccessMenu } from './permissions.js';
 import { notify } from './utils.js';
 
+
 import * as loginPage from './pages/login.js';
 import * as dashboardPage from './pages/dashboard.js';
 import * as usuariosPage from './pages/usuarios.js';
@@ -12,6 +13,7 @@ import * as agendamentosPage from './pages/agendamentos.js';
 import * as produtosPage from './pages/produtos.js';
 import * as estoquePage from './pages/estoque.js';
 import * as vendasPage from './pages/vendas.js';
+import * as pdvPage from './pages/pdv.js';
 import * as vacinasPage from './pages/vacinas.js';
 import * as consultasPage from './pages/consultas.js';
 import * as medicamentosPage from './pages/medicamentos.js';
@@ -31,6 +33,7 @@ export const routes = {
   '/produtos': produtosPage,
   '/estoque': estoquePage,
   '/vendas': vendasPage,
+  '/pdv': pdvPage,
   '/vacinas': vacinasPage,
   '/consultas': consultasPage,
   '/medicamentos': medicamentosPage,
@@ -73,22 +76,36 @@ export async function renderCurrentRoute(appRoot) {
     return;
   }
 
+ 
+  
   if (isLogged && !window.__permissionsLoaded) {
-    try {
-      await loadPermissions();
-      window.__permissionsLoaded = true;
-    } catch (error) {
-      clearPermissions();
-      notify('error', 'Não foi possível carregar as permissões do usuário.');
-      return;
+  try {
+    await loadPermissions();
+    window.__permissionsLoaded = true;
+
+    const sidebar = document.getElementById('sidebar');
+
+    if (sidebar) {
+      const currentHash = window.location.hash || '#/dashboard';
+      const { showSidebar } = await import('./components/sidebar.js');
+
+      showSidebar(sidebar, {
+        currentRoute: currentHash
+      });
     }
+  } catch (error) {
+    clearPermissions();
+    notify('error', 'Não foi possível carregar as permissões do usuário.');
+    return;
   }
+}
 
   const pageModule = routes[route] || dashboardPage;
   const page = await pageModule.render(appRoot, { route });
 
   const user = getCurrentUser();
-  const hasAccess = isLogged ? route === '/dashboard' || canAccessMenu(route.replace('/', '')) : true;
+  const moduleName = route === '/pdv' ? 'vendas' : route.replace('/', '');
+const hasAccess = isLogged ? route === '/dashboard' || canAccessMenu(moduleName) : true;
 
   if (isLogged && route !== '/login' && !hasAccess && user) {
     notify('warning', 'Você não tem acesso a este módulo.');
